@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -X POST http://localhost:5687/webhook/req-meeting -H 'Content-Type: application/json' -d '{\"user_name\":\"Alice Smith\",\"user_email\":\"alice@example.com\",\"meeting_time\":\"2026-10-20T10:30:00Z\",\"company_name\":\"Tech Corp\",\"job_opportunity\":\"DevOps Engineer\",\"recruiter_name\":\"Bob Wilson\"}')",
+      "Bash(curl http://localhost:5687/api/meetings/export/csv)",
+      "Bash(curl http://localhost:5687/api/meetings/export/all)",
+      "Bash(curl -X PATCH http://localhost:5687/api/meetings/1 -H 'Content-Type: application/json' -d '{\"is_active\": false}')",
+      "Bash(curl \"http://localhost:5687/api/meetings?is_active=true\")",
+      "Bash(curl \"http://localhost:5687/api/meetings?search=alice\")",
+      "Bash(curl -X DELETE http://localhost:5687/api/meetings/1)",
+      "Bash(curl http://localhost:5687/api/meetings)",
+      "Bash(curl -s -X PATCH http://localhost:5687/api/meetings/3 -H 'Content-Type: application/json' -d '{\"is_active\": false}')",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s -X DELETE http://localhost:5687/api/meetings/3 -w \"\\\\nHTTP Status: %{http_code}\\\\n\")",
+      "Bash(curl -s http://localhost:5687/api/meetings)",
+      "Bash(curl -s http://localhost:5687/api/settings)",
+      "Bash(curl -s http://localhost:5687/api/meetings/7)",
+      "Bash(curl -s http://localhost:5687/static/app.js)",
+      "Bash(curl -v -X POST http://localhost:5687/webhook/req-meeting -H 'Content-Type: application/json' -d '{\"user_name\": \"kai is the user\", \"user_email\": \"kai@kai.com\", \"meeting_time\": \"2026-10-01T10:00:00\", \"company_name\": \"mycomp\", \"job_opportunity\": \"tester\", \"recruiter_name\": \"kai\"}')"
+    ]
+  }
+}
