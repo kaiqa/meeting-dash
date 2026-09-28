@@ -292,6 +292,8 @@ class TestWebhookEndpoint:
         self, async_client: AsyncClient, sample_meeting_data
     ):
         """Test that multiple requests create separate records."""
+        from datetime import timedelta
+
         # First request
         response1 = await async_client.post(
             "/webhook/req-meeting",
@@ -300,9 +302,16 @@ class TestWebhookEndpoint:
         assert response1.status_code == 201
         id1 = response1.json()["id"]
 
-        # Second request with different email
+        # Second request with different email AND different meeting time (to avoid duplicate check)
         data = meeting_data_to_json(sample_meeting_data)
         data["user_email"] = "jane@example.com"
+        # Add 1 hour to meeting time to avoid duplicate conflict
+        original_time = data["meeting_time"]
+        if isinstance(original_time, str) and original_time.endswith("Z"):
+            from datetime import datetime
+            dt = datetime.fromisoformat(original_time.replace("Z", "+00:00"))
+            dt = dt + timedelta(hours=1)
+            data["meeting_time"] = dt.isoformat().replace("+00:00", "Z")
         response2 = await async_client.post(
             "/webhook/req-meeting",
             json=data,
@@ -311,3 +320,121 @@ class TestWebhookEndpoint:
         id2 = response2.json()["id"]
 
         assert id1 != id2
+
+    # --- Duplicate Meeting Date/Time Tests ---
+
+    @pytest.mark.webhook
+    @pytest.mark.asyncio
+    async def test_reject_duplicate_active_meeting_time(self, async_client: AsyncClient, sample_meeting_data):
+        """Test rejecting a meeting request with the same time as an existing active meeting."""
+        meeting_time = "2026-10-15T14:00:00Z"
+        data1 = meeting_data_to_json(sample_meeting_data)
+        data1["meeting_time"] = meeting_time
+        data1["user_email"] = "first@example.com"
+
+        # First request - should succeed
+        response1 = await async_client.post(
+            "/webhook/req-meeting",
+            json=data1,
+        )
+        assert response1.status_code == 201
+        first_meeting = response1.json()
+        assert first_meeting["is_active"] is True
+
+        # Second request with same meeting_time but different email - should fail
+        data2 = meeting_data_to_json(sample_meeting_data)
+        data2["meeting_time"] = meeting_time
+        data2["user_email"] = "second@example.com"
+
+        response2 = await async_client.post(
+            "/webhook/req-meeting",
+            json=data2,
+        )
+        assert response2.status_code == 409
+        error_data = response2.json()
+
+        assert error_data["detail"]["error"] == "date_taken"
+        assert "already taken" in error_data["detail"]["message"]
+        assert "existing_meeting" in error_data["detail"]
+        existing = error_data["detail"]["existing_meeting"]
+        assert existing["id"] == first_meeting["id"]
+        assert existing["user_email"] == "first@example.com"
+        assert existing["meeting_time"] == "2026-10-15T14:00:00"
+
+    @pytest.mark.webhook
+    @pytest.mark.asyncio
+    async def test_allow_same_time_after_deactivated(self, async_client: AsyncClient, sample_meeting_data, async_session):
+        """Test allowing a meeting at same time after the previous one is deactivated."""
+        from app.models.meeting import Meeting
+        from sqlalchemy import select
+
+        meeting_time = "2026-10-15T14:00:00Z"
+        data1 = meeting_data_to_json(sample_meeting_data)
+        data1["meeting_time"] = meeting_time
+        data1["user_email"] = "first@example.com"
+
+        # First request - should succeed
+        response1 = await async_client.post(
+            "/webhook/req-meeting",
+            json=data1,
+        )
+        assert response1.status_code == 201
+        first_meeting = response1.json()
+
+        # Deactivate the first meeting directly in DB
+        result = await async_session.execute(select(Meeting).where(Meeting.id == first_meeting["id"]))
+        meeting = result.scalar_one()
+        meeting.is_active = False
+        await async_session.commit()
+
+        # Second request with same meeting_time - should now succeed
+        data2 = meeting_data_to_json(sample_meeting_data)
+        data2["meeting_time"] = meeting_time
+        data2["user_email"] = "second@example.com"
+
+        response2 = await async_client.post(
+            "/webhook/req-meeting",
+            json=data2,
+        )
+        assert response2.status_code == 201
+        second_meeting = response2.json()
+        assert second_meeting["id"] != first_meeting["id"]
+        assert second_meeting["user_email"] == "second@example.com"
+
+    @pytest.mark.webhook
+    @pytest.mark.asyncio
+    async def test_reject_duplicate_dograh_format(self, async_client: AsyncClient):
+        """Test rejecting duplicate meeting time in Dograh AI format."""
+        meeting_time = "2026-10-15T14:00:00Z"
+        data1 = {
+            "recruiter_name": "First Recruiter",
+            "contact_email": "first@example.com",
+            "meeting_date": meeting_time,
+        }
+
+        # First request - should succeed
+        response1 = await async_client.post(
+            "/webhook/req-meeting",
+            json=data1,
+        )
+        assert response1.status_code == 201
+        first_meeting = response1.json()
+
+        # Second request in Dograh format with same time - should fail
+        data2 = {
+            "recruiter_name": "Second Recruiter",
+            "contact_email": "second@example.com",
+            "meeting_date": meeting_time,
+        }
+
+        response2 = await async_client.post(
+            "/webhook/req-meeting",
+            json=data2,
+        )
+        assert response2.status_code == 409
+        error_data = response2.json()
+
+        assert error_data["detail"]["error"] == "date_taken"
+        existing = error_data["detail"]["existing_meeting"]
+        assert existing["id"] == first_meeting["id"]
+        assert existing["user_email"] == "first@example.com"

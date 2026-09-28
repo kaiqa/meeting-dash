@@ -78,7 +78,15 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    """Handle HTTP exceptions."""
+    """Handle HTTP exceptions - return JSON for API routes, HTML for others."""
+    # Return JSON for API routes
+    if request.url.path.startswith("/api/") or request.url.path.startswith("/webhook/"):
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
+        )
+    # Return HTML for other routes (dashboard, etc.)
     return HTMLResponse(
         content=f"<h1>Error {exc.status_code}</h1><p>{exc.detail}</p>",
         status_code=exc.status_code,

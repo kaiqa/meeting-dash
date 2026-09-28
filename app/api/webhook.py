@@ -10,6 +10,7 @@ from app.database import get_async_db
 from app.models.meeting import Meeting
 from app.schemas.meeting import MeetingResponse
 from app.services.websocket import websocket_manager
+from datetime import timezone
 
 router = APIRouter(prefix="/webhook", tags=["webhook"])
 
@@ -96,11 +97,55 @@ async def receive_meeting_request(
             detail="Missing required field: meeting_time or meeting_date"
         )
 
-    # Create meeting record
+    # Normalize meeting_time to UTC and strip timezone for comparison with naive DB storage
+    try:
+        if meeting_time.tzinfo is not None:
+            meeting_time_utc = meeting_time.astimezone(timezone.utc).replace(tzinfo=None)
+        else:
+            meeting_time_utc = meeting_time
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid meeting time format: {str(e)}"
+        )
+
+    # Check if there's already an active meeting at the same time
+    try:
+        existing_meeting = await db.execute(
+            select(Meeting).where(
+                Meeting.meeting_time == meeting_time_utc,
+                Meeting.is_active == True
+            )
+        )
+        existing_meeting = existing_meeting.scalar_one_or_none()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
+
+    if existing_meeting:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "date_taken",
+                "message": "The requested meeting date/time is already taken by an active meeting",
+                "existing_meeting": {
+                    "id": existing_meeting.id,
+                    "user_name": existing_meeting.user_name,
+                    "user_email": existing_meeting.user_email,
+                    "meeting_time": existing_meeting.meeting_time.isoformat() if existing_meeting.meeting_time else None,
+                    "company_name": existing_meeting.company_name,
+                    "recruiter_name": existing_meeting.recruiter_name,
+                }
+            }
+        )
+
+    # Create meeting record (use normalized UTC time without timezone)
     meeting = Meeting(
         user_name=user_name,
         user_email=user_email,
-        meeting_time=meeting_time,
+        meeting_time=meeting_time_utc,
         company_name=payload.company_name,
         job_opportunity=payload.job_opportunity,
         recruiter_name=payload.recruiter_name,
