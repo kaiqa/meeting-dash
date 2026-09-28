@@ -548,3 +548,8 @@ MIT License - Feel free to use and modify for your needs.
 ## Support
 
 For issues and feature requests, please open a GitHub issue.
+
+Note: 
+ docker exec meetings-mysql mysql -u meetings_user -pmeetings_password meetings_db -e "ALTER TABLE meetings ADD COLUMN meeting_duration INT NOT NULL DEFAULT 30;"
+ docker compose -f docker-compose.yml build --no-cache
+docker compose up -d

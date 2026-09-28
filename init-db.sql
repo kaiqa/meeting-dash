@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS `meetings` (
     `user_name` VARCHAR(255) NOT NULL,
     `user_email` VARCHAR(255) NOT NULL,
     `meeting_time` DATETIME NOT NULL,
+    `meeting_duration` INT NOT NULL DEFAULT 30,
     `company_name` VARCHAR(255) NULL,
     `job_opportunity` TEXT NULL,
     `recruiter_name` VARCHAR(255) NULL,
