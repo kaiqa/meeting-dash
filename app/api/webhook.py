@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from app.database import get_async_db
@@ -36,6 +36,7 @@ class DograhWebhookPayload(BaseModel):
     # Optional fields in both formats
     company_name: Optional[str] = Field(None, description="Caller's company name")
     job_opportunity: Optional[str] = Field(None, description="Job opportunity details")
+    meeting_duration: Optional[int] = Field(30, ge=5, le=480, description="Meeting duration in minutes (default 30, min 5, max 480)")
 
 
 @router.post(
@@ -50,6 +51,7 @@ class DograhWebhookPayload(BaseModel):
     - recruiter_name: Caller/recruiter name
     - contact_email: Contact email address
     - meeting_date: Meeting date/time in ISO 8601 format (e.g., 2026-10-15T14:00:00Z)
+    - meeting_duration: Meeting duration in minutes (optional, default 30, min 5, max 480)
     - company_name: Caller's company name (optional)
     - job_opportunity: Job opportunity details (optional)
 
@@ -57,9 +59,16 @@ class DograhWebhookPayload(BaseModel):
     - user_name: Full name of the user
     - user_email: Email address of the user
     - meeting_time: Requested meeting date and time in ISO 8601 format
+    - meeting_duration: Meeting duration in minutes (optional, default 30, min 5, max 480)
     - company_name: Caller's company name (optional)
     - job_opportunity: Job opportunity details (optional)
     - recruiter_name: Caller's name (optional)
+
+    **Overlap Detection:**
+    The endpoint checks for overlapping meetings. A new meeting is rejected if its
+    time range (meeting_time to meeting_time + meeting_duration) overlaps with any
+    existing active meeting. Two meetings overlap if:
+    - new_start < existing_end AND new_end > existing_start
     """,
 )
 async def receive_meeting_request(
@@ -79,6 +88,7 @@ async def receive_meeting_request(
     user_name = payload.user_name or payload.recruiter_name
     user_email = payload.user_email or payload.contact_email
     meeting_time = payload.meeting_time or payload.meeting_date
+    meeting_duration = payload.meeting_duration or 30
 
     # Validate required fields after mapping
     if not user_name:
@@ -109,15 +119,30 @@ async def receive_meeting_request(
             detail=f"Invalid meeting time format: {str(e)}"
         )
 
-    # Check if there's already an active meeting at the same time
+    # Calculate meeting end time
+    meeting_end_utc = meeting_time_utc + timedelta(minutes=meeting_duration)
+
+    # Check for overlapping active meetings
+    # Two meetings overlap if: new_start < existing_end AND new_end > existing_start
+    # We calculate existing_end in Python for each meeting to avoid database-specific functions
     try:
-        existing_meeting = await db.execute(
+        # First, get all active meetings that could potentially overlap
+        # (meetings that start before the new meeting ends)
+        potential_overlaps = await db.execute(
             select(Meeting).where(
-                Meeting.meeting_time == meeting_time_utc,
-                Meeting.is_active == True
+                Meeting.is_active == True,
+                Meeting.meeting_time < meeting_end_utc
             )
         )
-        existing_meeting = existing_meeting.scalar_one_or_none()
+        potential_meetings = potential_overlaps.scalars().all()
+
+        # Check each for actual overlap
+        existing_meeting = None
+        for meeting in potential_meetings:
+            existing_end = meeting.meeting_time + timedelta(minutes=meeting.meeting_duration)
+            if existing_end > meeting_time_utc:
+                existing_meeting = meeting
+                break
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -125,16 +150,24 @@ async def receive_meeting_request(
         )
 
     if existing_meeting:
+        existing_end = existing_meeting.meeting_time + timedelta(minutes=existing_meeting.meeting_duration)
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
-                "error": "date_taken",
-                "message": "The requested meeting date/time is already taken by an active meeting",
+                "error": "time_slot_taken",
+                "message": "The requested meeting time slot overlaps with an existing active meeting",
+                "requested_slot": {
+                    "start": meeting_time_utc.isoformat(),
+                    "end": meeting_end_utc.isoformat(),
+                    "duration_minutes": meeting_duration,
+                },
                 "existing_meeting": {
                     "id": existing_meeting.id,
                     "user_name": existing_meeting.user_name,
                     "user_email": existing_meeting.user_email,
                     "meeting_time": existing_meeting.meeting_time.isoformat() if existing_meeting.meeting_time else None,
+                    "meeting_duration": existing_meeting.meeting_duration,
+                    "meeting_end": existing_end.isoformat() if existing_end else None,
                     "company_name": existing_meeting.company_name,
                     "recruiter_name": existing_meeting.recruiter_name,
                 }
@@ -146,6 +179,7 @@ async def receive_meeting_request(
         user_name=user_name,
         user_email=user_email,
         meeting_time=meeting_time_utc,
+        meeting_duration=meeting_duration,
         company_name=payload.company_name,
         job_opportunity=payload.job_opportunity,
         recruiter_name=payload.recruiter_name,

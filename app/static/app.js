@@ -129,6 +129,19 @@ function formatDateShort(dateString) {
     });
 }
 
+function formatDuration(minutes) {
+    if (!minutes && minutes !== 0) return '-';
+    if (minutes < 60) {
+        return `${minutes} min`;
+    }
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    if (mins === 0) {
+        return `${hours}h`;
+    }
+    return `${hours}h ${mins}min`;
+}
+
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
@@ -428,6 +441,7 @@ function renderMeetingsTable() {
             <td class="cell-name">${escapeHtml(meeting.user_name)}</td>
             <td class="cell-email">${escapeHtml(meeting.user_email)}</td>
             <td class="cell-time">${formatDate(meeting.meeting_time)}</td>
+            <td class="cell-duration">${formatDuration(meeting.meeting_duration)}</td>
             <td class="cell-company">${escapeHtml(meeting.company_name || '-')}</td>
             <td class="cell-recruiter">${escapeHtml(meeting.recruiter_name || '-')}</td>
             <td>
@@ -508,6 +522,9 @@ function renderMeetingDetail(meeting) {
 
             <div class="detail-label">Meeting Time</div>
             <div class="detail-value">${formatDate(meeting.meeting_time)}</div>
+
+            <div class="detail-label">Duration</div>
+            <div class="detail-value">${formatDuration(meeting.meeting_duration)}</div>
 
             <div class="detail-label">Company</div>
             <div class="detail-value">${escapeHtml(meeting.company_name || 'Not provided')}</div>

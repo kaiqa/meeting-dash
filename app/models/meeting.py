@@ -1,7 +1,7 @@
 """Meeting request model."""
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import String, Text, DateTime, Boolean, func, Index
+from sqlalchemy import String, Text, DateTime, Boolean, func, Index, Integer
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -16,6 +16,7 @@ class Meeting(Base):
     user_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     user_email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     meeting_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    meeting_duration: Mapped[int] = mapped_column(Integer, default=30, nullable=False)  # Duration in minutes
     company_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     job_opportunity: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     recruiter_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)

@@ -225,7 +225,7 @@ async def export_meetings_csv(
 
     # Header
     writer.writerow([
-        "ID", "User Name", "User Email", "Meeting Time",
+        "ID", "User Name", "User Email", "Meeting Time", "Duration (min)",
         "Company Name", "Job Opportunity", "Recruiter Name",
         "Active", "Created At", "Updated At"
     ])
@@ -237,6 +237,7 @@ async def export_meetings_csv(
             meeting.user_name,
             meeting.user_email,
             meeting.meeting_time.isoformat() if meeting.meeting_time else "",
+            meeting.meeting_duration,
             meeting.company_name or "",
             meeting.job_opportunity or "",
             meeting.recruiter_name or "",

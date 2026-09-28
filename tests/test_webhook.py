@@ -1,7 +1,7 @@
 """Tests for webhook endpoint."""
 import pytest
 from httpx import AsyncClient
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 def meeting_data_to_json(data: dict) -> dict:
@@ -353,8 +353,8 @@ class TestWebhookEndpoint:
         assert response2.status_code == 409
         error_data = response2.json()
 
-        assert error_data["detail"]["error"] == "date_taken"
-        assert "already taken" in error_data["detail"]["message"]
+        assert error_data["detail"]["error"] == "time_slot_taken"
+        assert "overlaps" in error_data["detail"]["message"]
         assert "existing_meeting" in error_data["detail"]
         existing = error_data["detail"]["existing_meeting"]
         assert existing["id"] == first_meeting["id"]
@@ -434,7 +434,408 @@ class TestWebhookEndpoint:
         assert response2.status_code == 409
         error_data = response2.json()
 
-        assert error_data["detail"]["error"] == "date_taken"
+        assert error_data["detail"]["error"] == "time_slot_taken"
         existing = error_data["detail"]["existing_meeting"]
         assert existing["id"] == first_meeting["id"]
         assert existing["user_email"] == "first@example.com"
+
+    # --- Meeting Duration Tests ---
+
+    @pytest.mark.webhook
+    @pytest.mark.asyncio
+    async def test_receive_meeting_with_duration(self, async_client: AsyncClient):
+        """Test receiving a meeting request with custom duration."""
+        dograh_data = {
+            "recruiter_name": "Jane Smith",
+            "contact_email": "jane@dograh.ai",
+            "meeting_date": "2026-10-15T14:00:00Z",
+            "meeting_duration": 60,
+        }
+
+        response = await async_client.post(
+            "/webhook/req-meeting",
+            json=dograh_data,
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+
+        assert data["user_name"] == "Jane Smith"
+        assert data["meeting_duration"] == 60
+
+    @pytest.mark.webhook
+    @pytest.mark.asyncio
+    async def test_default_duration_is_30_minutes(self, async_client: AsyncClient):
+        """Test that default meeting duration is 30 minutes when not specified."""
+        dograh_data = {
+            "recruiter_name": "Jane Smith",
+            "contact_email": "jane@dograh.ai",
+            "meeting_date": "2026-10-15T14:00:00Z",
+        }
+
+        response = await async_client.post(
+            "/webhook/req-meeting",
+            json=dograh_data,
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+
+        assert data["meeting_duration"] == 30
+
+    @pytest.mark.webhook
+    @pytest.mark.asyncio
+    async def test_reject_duration_below_minimum(self, async_client: AsyncClient):
+        """Test rejecting meeting with duration less than 5 minutes."""
+        dograh_data = {
+            "recruiter_name": "Jane Smith",
+            "contact_email": "jane@dograh.ai",
+            "meeting_date": "2026-10-15T14:00:00Z",
+            "meeting_duration": 3,  # Below minimum of 5
+        }
+
+        response = await async_client.post(
+            "/webhook/req-meeting",
+            json=dograh_data,
+        )
+
+        assert response.status_code == 422
+
+    @pytest.mark.webhook
+    @pytest.mark.asyncio
+    async def test_reject_duration_above_maximum(self, async_client: AsyncClient):
+        """Test rejecting meeting with duration more than 480 minutes (8 hours)."""
+        dograh_data = {
+            "recruiter_name": "Jane Smith",
+            "contact_email": "jane@dograh.ai",
+            "meeting_date": "2026-10-15T14:00:00Z",
+            "meeting_duration": 500,  # Above maximum of 480
+        }
+
+        response = await async_client.post(
+            "/webhook/req-meeting",
+            json=dograh_data,
+        )
+
+        assert response.status_code == 422
+
+    @pytest.mark.webhook
+    @pytest.mark.asyncio
+    async def test_accept_minimum_duration(self, async_client: AsyncClient):
+        """Test accepting meeting with minimum duration (5 minutes)."""
+        dograh_data = {
+            "recruiter_name": "Jane Smith",
+            "contact_email": "jane@dograh.ai",
+            "meeting_date": "2026-10-15T14:00:00Z",
+            "meeting_duration": 5,
+        }
+
+        response = await async_client.post(
+            "/webhook/req-meeting",
+            json=dograh_data,
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["meeting_duration"] == 5
+
+    @pytest.mark.webhook
+    @pytest.mark.asyncio
+    async def test_accept_maximum_duration(self, async_client: AsyncClient):
+        """Test accepting meeting with maximum duration (480 minutes)."""
+        dograh_data = {
+            "recruiter_name": "Jane Smith",
+            "contact_email": "jane@dograh.ai",
+            "meeting_date": "2026-10-15T14:00:00Z",
+            "meeting_duration": 480,
+        }
+
+        response = await async_client.post(
+            "/webhook/req-meeting",
+            json=dograh_data,
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["meeting_duration"] == 480
+
+    # --- Overlap Detection Tests ---
+
+    @pytest.mark.webhook
+    @pytest.mark.asyncio
+    async def test_reject_overlapping_meeting_same_start_time(self, async_client: AsyncClient):
+        """Test rejecting meeting that starts at same time as existing (with different durations)."""
+        # First meeting: 30 min at 14:00
+        data1 = {
+            "recruiter_name": "First Recruiter",
+            "contact_email": "first@example.com",
+            "meeting_date": "2026-10-15T14:00:00Z",
+            "meeting_duration": 30,
+        }
+        response1 = await async_client.post("/webhook/req-meeting", json=data1)
+        assert response1.status_code == 201
+        first_meeting = response1.json()
+
+        # Second meeting: same start, 60 min - should overlap
+        data2 = {
+            "recruiter_name": "Second Recruiter",
+            "contact_email": "second@example.com",
+            "meeting_date": "2026-10-15T14:00:00Z",
+            "meeting_duration": 60,
+        }
+        response2 = await async_client.post("/webhook/req-meeting", json=data2)
+        assert response2.status_code == 409
+        error_data = response2.json()
+        assert error_data["detail"]["error"] == "time_slot_taken"
+        assert "overlaps" in error_data["detail"]["message"]
+
+    @pytest.mark.webhook
+    @pytest.mark.asyncio
+    async def test_reject_overlapping_meeting_starts_during_existing(self, async_client: AsyncClient):
+        """Test rejecting meeting that starts during an existing meeting."""
+        # First meeting: 60 min at 14:00 (ends at 15:00)
+        data1 = {
+            "recruiter_name": "First Recruiter",
+            "contact_email": "first@example.com",
+            "meeting_date": "2026-10-15T14:00:00Z",
+            "meeting_duration": 60,
+        }
+        response1 = await async_client.post("/webhook/req-meeting", json=data1)
+        assert response1.status_code == 201
+        first_meeting = response1.json()
+
+        # Second meeting: starts at 14:30 (during first meeting), 30 min
+        data2 = {
+            "recruiter_name": "Second Recruiter",
+            "contact_email": "second@example.com",
+            "meeting_date": "2026-10-15T14:30:00Z",
+            "meeting_duration": 30,
+        }
+        response2 = await async_client.post("/webhook/req-meeting", json=data2)
+        assert response2.status_code == 409
+        error_data = response2.json()
+        assert error_data["detail"]["error"] == "time_slot_taken"
+
+    @pytest.mark.webhook
+    @pytest.mark.asyncio
+    async def test_reject_overlapping_meeting_ends_during_existing(self, async_client: AsyncClient):
+        """Test rejecting meeting that ends during an existing meeting."""
+        # First meeting: 60 min at 14:00 (ends at 15:00)
+        data1 = {
+            "recruiter_name": "First Recruiter",
+            "contact_email": "first@example.com",
+            "meeting_date": "2026-10-15T14:00:00Z",
+            "meeting_duration": 60,
+        }
+        response1 = await async_client.post("/webhook/req-meeting", json=data1)
+        assert response1.status_code == 201
+        first_meeting = response1.json()
+
+        # Second meeting: starts at 13:30, 60 min (ends at 14:30 - during first meeting)
+        data2 = {
+            "recruiter_name": "Second Recruiter",
+            "contact_email": "second@example.com",
+            "meeting_date": "2026-10-15T13:30:00Z",
+            "meeting_duration": 60,
+        }
+        response2 = await async_client.post("/webhook/req-meeting", json=data2)
+        assert response2.status_code == 409
+        error_data = response2.json()
+        assert error_data["detail"]["error"] == "time_slot_taken"
+
+    @pytest.mark.webhook
+    @pytest.mark.asyncio
+    async def test_reject_overlapping_meeting_encompasses_existing(self, async_client: AsyncClient):
+        """Test rejecting meeting that fully encompasses an existing meeting."""
+        # First meeting: 30 min at 14:30
+        data1 = {
+            "recruiter_name": "First Recruiter",
+            "contact_email": "first@example.com",
+            "meeting_date": "2026-10-15T14:30:00Z",
+            "meeting_duration": 30,
+        }
+        response1 = await async_client.post("/webhook/req-meeting", json=data1)
+        assert response1.status_code == 201
+        first_meeting = response1.json()
+
+        # Second meeting: 60 min at 14:00 (encompasses first meeting)
+        data2 = {
+            "recruiter_name": "Second Recruiter",
+            "contact_email": "second@example.com",
+            "meeting_date": "2026-10-15T14:00:00Z",
+            "meeting_duration": 60,
+        }
+        response2 = await async_client.post("/webhook/req-meeting", json=data2)
+        assert response2.status_code == 409
+        error_data = response2.json()
+        assert error_data["detail"]["error"] == "time_slot_taken"
+
+    @pytest.mark.webhook
+    @pytest.mark.asyncio
+    async def test_allow_adjacent_meetings_no_overlap(self, async_client: AsyncClient):
+        """Test allowing meetings that are adjacent (end == start) without overlap."""
+        # First meeting: 30 min at 14:00 (ends at 14:30)
+        data1 = {
+            "recruiter_name": "First Recruiter",
+            "contact_email": "first@example.com",
+            "meeting_date": "2026-10-15T14:00:00Z",
+            "meeting_duration": 30,
+        }
+        response1 = await async_client.post("/webhook/req-meeting", json=data1)
+        assert response1.status_code == 201
+        first_meeting = response1.json()
+
+        # Second meeting: starts exactly when first ends (14:30)
+        data2 = {
+            "recruiter_name": "Second Recruiter",
+            "contact_email": "second@example.com",
+            "meeting_date": "2026-10-15T14:30:00Z",
+            "meeting_duration": 30,
+        }
+        response2 = await async_client.post("/webhook/req-meeting", json=data2)
+        assert response2.status_code == 201
+        second_meeting = response2.json()
+        assert second_meeting["id"] != first_meeting["id"]
+
+    @pytest.mark.webhook
+    @pytest.mark.asyncio
+    async def test_allow_meeting_after_existing_ends(self, async_client: AsyncClient):
+        """Test allowing meeting that starts after existing meeting ends."""
+        # First meeting: 30 min at 14:00 (ends at 14:30)
+        data1 = {
+            "recruiter_name": "First Recruiter",
+            "contact_email": "first@example.com",
+            "meeting_date": "2026-10-15T14:00:00Z",
+            "meeting_duration": 30,
+        }
+        response1 = await async_client.post("/webhook/req-meeting", json=data1)
+        assert response1.status_code == 201
+        first_meeting = response1.json()
+
+        # Second meeting: starts 1 minute after first ends (14:31)
+        data2 = {
+            "recruiter_name": "Second Recruiter",
+            "contact_email": "second@example.com",
+            "meeting_date": "2026-10-15T14:31:00Z",
+            "meeting_duration": 30,
+        }
+        response2 = await async_client.post("/webhook/req-meeting", json=data2)
+        assert response2.status_code == 201
+        second_meeting = response2.json()
+        assert second_meeting["id"] != first_meeting["id"]
+
+    @pytest.mark.webhook
+    @pytest.mark.asyncio
+    async def test_allow_meeting_before_existing_starts(self, async_client: AsyncClient):
+        """Test allowing meeting that ends before existing meeting starts."""
+        # First meeting: 30 min at 14:30
+        data1 = {
+            "recruiter_name": "First Recruiter",
+            "contact_email": "first@example.com",
+            "meeting_date": "2026-10-15T14:30:00Z",
+            "meeting_duration": 30,
+        }
+        response1 = await async_client.post("/webhook/req-meeting", json=data1)
+        assert response1.status_code == 201
+        first_meeting = response1.json()
+
+        # Second meeting: ends 1 minute before first starts (14:29)
+        data2 = {
+            "recruiter_name": "Second Recruiter",
+            "contact_email": "second@example.com",
+            "meeting_date": "2026-10-15T13:59:00Z",
+            "meeting_duration": 30,
+        }
+        response2 = await async_client.post("/webhook/req-meeting", json=data2)
+        assert response2.status_code == 201
+        second_meeting = response2.json()
+        assert second_meeting["id"] != first_meeting["id"]
+
+    @pytest.mark.webhook
+    @pytest.mark.asyncio
+    async def test_overlap_error_includes_requested_and_existing_slots(self, async_client: AsyncClient):
+        """Test that overlap error response includes detailed slot information."""
+        # First meeting: 60 min at 14:00
+        data1 = {
+            "recruiter_name": "First Recruiter",
+            "contact_email": "first@example.com",
+            "meeting_date": "2026-10-15T14:00:00Z",
+            "meeting_duration": 60,
+        }
+        response1 = await async_client.post("/webhook/req-meeting", json=data1)
+        assert response1.status_code == 201
+        first_meeting = response1.json()
+
+        # Second meeting: overlaps
+        data2 = {
+            "recruiter_name": "Second Recruiter",
+            "contact_email": "second@example.com",
+            "meeting_date": "2026-10-15T14:30:00Z",
+            "meeting_duration": 30,
+        }
+        response2 = await async_client.post("/webhook/req-meeting", json=data2)
+        assert response2.status_code == 409
+        error_data = response2.json()
+
+        detail = error_data["detail"]
+        assert detail["error"] == "time_slot_taken"
+        assert "requested_slot" in detail
+        assert "existing_meeting" in detail
+
+        requested = detail["requested_slot"]
+        assert requested["start"] == "2026-10-15T14:30:00"
+        assert requested["end"] == "2026-10-15T15:00:00"
+        assert requested["duration_minutes"] == 30
+
+        existing = detail["existing_meeting"]
+        assert existing["id"] == first_meeting["id"]
+        assert existing["meeting_duration"] == 60
+        assert existing["meeting_end"] == "2026-10-15T15:00:00"
+
+    @pytest.mark.webhook
+    @pytest.mark.asyncio
+    async def test_overlap_check_only_considers_active_meetings(self, async_client: AsyncClient, async_session):
+        """Test that overlap check ignores inactive meetings."""
+        from app.models.meeting import Meeting
+        from sqlalchemy import select
+
+        # Create first meeting and deactivate it
+        meeting = Meeting(
+            user_name="First Recruiter",
+            user_email="first@example.com",
+            meeting_time=datetime.fromisoformat("2026-10-15T14:00:00"),
+            meeting_duration=60,
+            is_active=False,
+        )
+        async_session.add(meeting)
+        await async_session.commit()
+        await async_session.refresh(meeting)
+
+        # New meeting at same time should succeed since first is inactive
+        data2 = {
+            "recruiter_name": "Second Recruiter",
+            "contact_email": "second@example.com",
+            "meeting_date": "2026-10-15T14:00:00Z",
+            "meeting_duration": 30,
+        }
+        response2 = await async_client.post("/webhook/req-meeting", json=data2)
+        assert response2.status_code == 201
+        second_meeting = response2.json()
+        assert second_meeting["id"] != meeting.id
+
+    @pytest.mark.webhook
+    @pytest.mark.asyncio
+    async def test_legacy_format_with_duration(self, async_client: AsyncClient):
+        """Test legacy format also accepts meeting_duration."""
+        data = {
+            "user_name": "John Doe",
+            "user_email": "john@example.com",
+            "meeting_time": "2026-10-15T14:00:00Z",
+            "meeting_duration": 45,
+        }
+
+        response = await async_client.post("/webhook/req-meeting", json=data)
+
+        assert response.status_code == 201
+        result = response.json()
+        assert result["meeting_duration"] == 45

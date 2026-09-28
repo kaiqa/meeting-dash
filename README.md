@@ -12,6 +12,7 @@ A modern, production-ready dashboard for managing meeting requests received via 
 - 🐳 **Docker Ready** - Production-ready Docker Compose deployment
 - 🧪 **Comprehensive Tests** - Pytest suite with unit and integration tests
 - 🌙 **Dark/Light Theme** - Automatic theme detection with manual toggle support
+- ⏱️ **Meeting Duration Support** - Configurable meeting duration with overlap detection (5-480 minutes)
 
 ## Architecture
 
@@ -161,6 +162,7 @@ The webhook accepts **two formats** for maximum compatibility:
   "recruiter_name": "John Doe",
   "contact_email": "john@example.com",
   "meeting_date": "2026-10-15T14:00:00Z",
+  "meeting_duration": 30,
   "company_name": "Acme Corp",
   "job_opportunity": "Senior Software Engineer"
 }
@@ -172,6 +174,7 @@ The webhook accepts **two formats** for maximum compatibility:
   "user_name": "John Doe",
   "user_email": "john@example.com",
   "meeting_time": "2026-10-15T14:00:00Z",
+  "meeting_duration": 30,
   "company_name": "Acme Corp",
   "job_opportunity": "Senior Software Engineer",
   "recruiter_name": "Jane Smith"
@@ -184,10 +187,41 @@ The webhook accepts **two formats** for maximum compatibility:
 - Date: `meeting_date` (Dograh) OR `meeting_time` (legacy)
 
 **Optional fields:**
+- `meeting_duration` - Meeting duration in minutes (default: 30, min: 5, max: 480)
 - `company_name` - Caller's company
 - `job_opportunity` - Job opportunity details
 
 **Response:** `201 Created` with meeting object
+
+**Overlap Detection:**
+The webhook checks for overlapping meetings before creating a new one. A meeting is rejected with `409 Conflict` if its time range (meeting_time to meeting_time + meeting_duration) overlaps with any existing active meeting.
+
+Overlap logic: `new_start < existing_end AND new_end > existing_start`
+
+Error response includes detailed information:
+```json
+{
+  "detail": {
+    "error": "time_slot_taken",
+    "message": "The requested meeting time slot overlaps with an existing active meeting",
+    "requested_slot": {
+      "start": "2026-10-15T14:30:00",
+      "end": "2026-10-15T15:00:00",
+      "duration_minutes": 30
+    },
+    "existing_meeting": {
+      "id": 1,
+      "user_name": "John Doe",
+      "user_email": "john@example.com",
+      "meeting_time": "2026-10-15T14:00:00",
+      "meeting_duration": 60,
+      "meeting_end": "2026-10-15T15:00:00",
+      "company_name": "Acme Corp",
+      "recruiter_name": "Jane Smith"
+    }
+  }
+}
+```
 
 ### REST API Endpoints
 
@@ -235,6 +269,7 @@ WS /ws
     "user_name": "John Doe",
     "user_email": "john@example.com",
     "meeting_time": "2026-10-15T14:00:00Z",
+    "meeting_duration": 30,
     "company_name": "Acme Corp",
     "job_opportunity": "Senior Engineer",
     "recruiter_name": "Jane Smith",
@@ -251,13 +286,13 @@ WS /ws
 - **Statistics Cards** - Total, Active, Inactive, Today counts
 - **Search** - Filter by name, email, company, or recruiter
 - **Filters** - Status (Active/Inactive), Sort options, Page size
-- **Table** - Sortable columns, inline actions
+- **Table** - Sortable columns including Duration, inline actions
 - **Actions per row:**
-  - 👁 View Details - Full meeting information modal
+  - 👁 View Details - Full meeting information modal (includes duration)
   - ↻ Toggle - Activate/Deactivate
   - ⬇ Download - Export single meeting as JSON
   - 🗑 Delete - Permanent removal (with confirmation)
-- **Bulk Export** - Download all as JSON or CSV
+- **Bulk Export** - Download all as JSON or CSV (includes duration)
 - **Pagination** - Navigate through pages
 
 ### Settings Page
@@ -368,6 +403,7 @@ CREATE TABLE meetings (
     user_name VARCHAR(255) NOT NULL,
     user_email VARCHAR(255) NOT NULL,
     meeting_time DATETIME NOT NULL,
+    meeting_duration INT NOT NULL DEFAULT 30,
     company_name VARCHAR(255),
     job_opportunity TEXT,
     recruiter_name VARCHAR(255),
