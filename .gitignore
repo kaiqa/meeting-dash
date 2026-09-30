@@ -123,3 +123,11 @@ secrets.yml
 *~
 *.bak
 *.backup
+
+# Node.js / npm
+node_modules/
+npm-debug.log*
+yarn-error.log
+yarn-debug.log*
+.pnp
+.pnp.js
