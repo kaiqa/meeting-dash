@@ -1,6 +1,6 @@
 # Meeting Request Dashboard
 
-A modern, production-ready dashboard for managing meeting requests received via webhook. Built with FastAPI, MySQL, and vanilla JavaScript.
+A modern, production-ready dashboard for managing meeting requests received via webhook from Dograh AI. Built with FastAPI, MySQL, and vanilla JavaScript.
 
 ## Features
 
@@ -18,8 +18,8 @@ A modern, production-ready dashboard for managing meeting requests received via 
 
 ```
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────┐
-│  Webhook Sender │────▶│  Webhook Endpoint │────▶│   MySQL     │
-│   (External)    │     │  /webhook/req-meeting           │
+│   Dograh AI     │────▶│  Webhook Endpoint │────▶│   MySQL     │
+│  (Webhook)      │     │  /webhook/req-meeting           │
 └─────────────────┘     └────────┬─────────┘     └─────────────┘
                                  │
                     ┌────────────┴────────────┐
@@ -130,7 +130,7 @@ All endpoints tested and verified working:
 |----------|--------|--------|-------------|
 | `/health` | GET | ✅ | Application health check |
 | `/webhook/health` | GET | ✅ | Webhook health check |
-| `/webhook/req-meeting` | POST | ✅ | Receive meeting (primary & legacy formats) |
+| `/webhook/req-meeting` | POST | ✅ | Receive meeting (Dograh AI & legacy) |
 | `/api/meetings` | GET | ✅ | List meetings (paginated, filterable) |
 | `/api/meetings/{id}` | GET | ✅ | Get single meeting |
 | `/api/meetings/{id}` | PATCH | ✅ | Update meeting (activate/deactivate) |
@@ -156,7 +156,7 @@ Content-Type: application/json
 
 The webhook accepts **two formats** for maximum compatibility:
 
-**1. Primary Format:**
+**1. Dograh AI Format (Primary):**
 ```json
 {
   "recruiter_name": "John Doe",
@@ -182,9 +182,9 @@ The webhook accepts **two formats** for maximum compatibility:
 ```
 
 **Required fields (either format):**
-- Name: `recruiter_name` (primary) OR `user_name` (legacy)
-- Email: `contact_email` (primary) OR `user_email` (legacy)
-- Date: `meeting_date` (primary) OR `meeting_time` (legacy)
+- Name: `recruiter_name` (Dograh) OR `user_name` (legacy)
+- Email: `contact_email` (Dograh) OR `user_email` (legacy)
+- Date: `meeting_date` (Dograh) OR `meeting_time` (legacy)
 
 **Optional fields:**
 - `meeting_duration` - Meeting duration in minutes (default: 30, min: 5, max: 480)
@@ -485,7 +485,7 @@ meetings/
 ### Common Issues
 
 **Webhook not receiving requests:**
-- Verify the webhook sender is sending to correct URL (`http://YOUR_IP:5687/webhook/req-meeting`)
+- Verify Dograh AI is sending to correct URL (`http://YOUR_IP:5687/webhook/req-meeting`)
 - Check firewall allows port 5687
 - Verify `WEBHOOK_HOST` is set to `0.0.0.0` (not `localhost` or `127.0.0.1`)
 

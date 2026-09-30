@@ -38,6 +38,7 @@ const elements = {
     // Navigation
     sidebar: document.getElementById('sidebar'),
     sidebarToggle: document.getElementById('sidebar-toggle'),
+    sidebarCollapseToggle: document.getElementById('sidebar-collapse-toggle'),
     navItems: document.querySelectorAll('.nav-item'),
     pages: document.querySelectorAll('.page'),
 
@@ -783,10 +784,17 @@ function showToast(message, type = 'info') {
 // Event Listeners
 // ============================================
 function setupEventListeners() {
-    // Sidebar toggle
+    // Sidebar toggle (top bar)
     elements.sidebarToggle.addEventListener('click', () => {
         elements.sidebar.classList.toggle('collapsed');
     });
+
+    // Sidebar collapse toggle (sidebar header)
+    if (elements.sidebarCollapseToggle) {
+        elements.sidebarCollapseToggle.addEventListener('click', () => {
+            elements.sidebar.classList.toggle('collapsed');
+        });
+    }
 
     // Theme toggle
     if (elements.themeToggle) {

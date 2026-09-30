@@ -58,12 +58,12 @@ RUN mkdir -p /data && chown appuser:appuser /data
 # Switch to non-root user
 USER appuser
 
-# Expose port
+# Expose port (uses APP_PORT from environment at runtime)
 EXPOSE 5687
 
-# Health check
+# Health check (uses APP_PORT from environment at runtime via shell)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:5687/health || exit 1
+    CMD sh -c 'curl -f http://localhost:${APP_PORT:-5687}/health || exit 1'
 
-# Run application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "5687", "--workers", "4"]
+# Run application (uses APP_PORT from environment, defaults to 5687)
+CMD sh -c 'exec uvicorn app.main:app --host 0.0.0.0 --port ${APP_PORT:-5687} --workers 4'
